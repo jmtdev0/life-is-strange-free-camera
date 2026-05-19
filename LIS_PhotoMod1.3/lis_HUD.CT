@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<CheatTable CheatEngineTableVersion="26">
+  <CheatEntries>
+    <CheatEntry>
+      <ID>15681</ID>
+      <Description>"HUD value (0 off, 1 on)"</Description>
+      <VariableType>4 Bytes</VariableType>
+      <Address>LifeIsStrange.exe+1110598</Address>
+    </CheatEntry>
+    <CheatEntry>
+      <ID>15676</ID>
+      <Description>"HUD and outlines toggle [Delete]"</Description>
+      <LastState/>
+      <VariableType>Auto Assembler Script</VariableType>
+      <AssemblerScript>[ENABLE]
+
+LifeIsStrange.exe+1110598:
+  dd 0
+
+//LifeIsStrange.exe+9DB329
+aobscanmodule(outAOB,LifeIsStrange.exe,39 8A 9C 4F 00 00)
+alloc(newmem,$32)
+
+label(code)
+label(return)
+
+newmem:
+
+code:
+  mov [edx+00004F9C],0
+  cmp [edx+00004F9C],ecx
+  jmp return
+
+outAOB:
+  jmp newmem
+  nop
+return:
+registersymbol(outAOB)
+
+[DISABLE]
+
+LifeIsStrange.exe+1110598:
+  dd 1
+
+outAOB:
+  db 39 8A 9C 4F 00 00
+
+unregistersymbol(outAOB)
+dealloc(newmem)
+
+</AssemblerScript>
+      <Hotkeys>
+        <Hotkey>
+          <Action>Toggle Activation</Action>
+          <Keys>
+            <Key>46</Key>
+          </Keys>
+          <ID>0</ID>
+        </Hotkey>
+      </Hotkeys>
+    </CheatEntry>
+  </CheatEntries>
+  <UserdefinedSymbols/>
+</CheatTable>
