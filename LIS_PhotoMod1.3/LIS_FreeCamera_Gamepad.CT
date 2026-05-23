@@ -243,7 +243,10 @@ lfcInitTimer.OnTimer = function(sender)
   local strafeSpeedScale = 0.75
   local targetDistanceMin = 1000
   local gamepadMoveDeadzone = 0.30
-  local gamepadLookDeadzone = 0.28
+  local gamepadLookDeadzone = 0.14
+  local gamepadLookCurve = 1.8
+  local gamepadLookSmoothing = 0.35
+  local gamepadLookStopThreshold = 0.01
   local gamepadLookPixels = 16
   local gamepadSlowDiv = 4
   local gamepadFastMult = 36
@@ -281,8 +284,10 @@ lfcInitTimer.OnTimer = function(sender)
   local stableViewZ = nil
   local stableYaw = nil
   local stablePitch = nil
+  local smoothedLookX = 0
+  local smoothedLookY = 0
 
-  debugLog(string.format("initialized cbase=0x%X flySpeed=%s cameraTimer=%d maxStep=%.2f strafeScale=%.2f targetDistanceMin=%.0f padDeadzones=(move=%.2f look=%.2f) speedMods=(slow=/%.1f fast=x%.1f) hookWriter=%s directWrite=%s stableView=%s stablePose=%s mouseRecenter=%s", cbase, tostring(flySpeed), cameraTimerInterval, maxCameraStepScale, strafeSpeedScale, targetDistanceMin, gamepadMoveDeadzone, gamepadLookDeadzone, gamepadSlowDiv, gamepadFastMult, tostring(hookWriterEnabled), tostring(directWriteWithHook), tostring(stableViewEnabled), tostring(stablePoseEnabled), tostring(mouseRecenterEnabled and setMousePos ~= nil)))
+  debugLog(string.format("initialized cbase=0x%X flySpeed=%s cameraTimer=%d maxStep=%.2f strafeScale=%.2f targetDistanceMin=%.0f padDeadzones=(move=%.2f look=%.2f) lookCurve=%.2f lookSmooth=%.2f speedMods=(slow=/%.1f fast=x%.1f) hookWriter=%s directWrite=%s stableView=%s stablePose=%s mouseRecenter=%s", cbase, tostring(flySpeed), cameraTimerInterval, maxCameraStepScale, strafeSpeedScale, targetDistanceMin, gamepadMoveDeadzone, gamepadLookDeadzone, gamepadLookCurve, gamepadLookSmoothing, gamepadSlowDiv, gamepadFastMult, tostring(hookWriterEnabled), tostring(directWriteWithHook), tostring(stableViewEnabled), tostring(stablePoseEnabled), tostring(mouseRecenterEnabled and setMousePos ~= nil)))
   debugLogInputSnapshot()
 
   local function gameHasFocus()
@@ -553,14 +558,22 @@ lfcInitTimer.OnTimer = function(sender)
     return true, state
   end
 
-  local function gamepadAxis(value, deadzone)
+  local function gamepadAxis(value, deadzone, curve)
     if value == nil then return 0 end
     local n
     if value&gt;=0 then n = value/32767 else n = value/32768 end
     local a = math.abs(n)
     if a&lt;deadzone then return 0 end
-    if n&gt;0 then return (a-deadzone)/(1-deadzone) end
-    return -(a-deadzone)/(1-deadzone)
+    local scaled = (a-deadzone)/(1-deadzone)
+    if curve ~= nil and curve ~= 1 then scaled = scaled^curve end
+    if n&gt;0 then return scaled end
+    return -scaled
+  end
+
+  local function smoothLookAxis(current, target)
+    local nextValue = current+(target-current)*gamepadLookSmoothing
+    if target == 0 and math.abs(nextValue)&lt;gamepadLookStopThreshold then return 0 end
+    return nextValue
   end
 
   local function gamepadIsActive(pad)
@@ -883,8 +896,12 @@ lfcInitTimer.OnTimer = function(sender)
     if pad == nil then return false end
     local leftX = gamepadAxis(pad.ThumbLeftX, gamepadMoveDeadzone)
     local leftY = gamepadAxis(pad.ThumbLeftY, gamepadMoveDeadzone)
-    local rightX = gamepadAxis(pad.ThumbRightX, gamepadLookDeadzone)
-    local rightY = gamepadAxis(pad.ThumbRightY, gamepadLookDeadzone)
+    local targetRightX = gamepadAxis(pad.ThumbRightX, gamepadLookDeadzone, gamepadLookCurve)
+    local targetRightY = gamepadAxis(pad.ThumbRightY, gamepadLookDeadzone, gamepadLookCurve)
+    smoothedLookX = smoothLookAxis(smoothedLookX, targetRightX)
+    smoothedLookY = smoothLookAxis(smoothedLookY, targetRightY)
+    local rightX = smoothedLookX
+    local rightY = smoothedLookY
     local moved = moveAnalog(leftY, leftX, 0, moveSpeedScale, "gamepad")
     if rightX ~= 0 or rightY ~= 0 then
       local lookDX = rightX*gamepadLookPixels*cameraStepScale
