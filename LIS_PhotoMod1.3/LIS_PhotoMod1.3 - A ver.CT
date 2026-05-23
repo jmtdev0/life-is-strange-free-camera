@@ -191,6 +191,7 @@ end
   local gamepadLookPixels = 16
   local gamepadSlowDiv = 4
   local gamepadFastMult = 4
+  local gamepadControllerID = nil
   local hellaFast = 100 -- how fast in hella-fast mode
   local fastMult  = 10 -- how fast in fast mode
   local slowDiv   = 10 -- how slow in slow mode
@@ -701,9 +702,44 @@ end
     return true
   end
 
+  local function gamepadIsActive(pad)
+    if pad == nil then return false end
+    if math.abs(pad.ThumbLeftX or 0)&gt;2000 then return true end
+    if math.abs(pad.ThumbLeftY or 0)&gt;2000 then return true end
+    if math.abs(pad.ThumbRightX or 0)&gt;2000 then return true end
+    if math.abs(pad.ThumbRightY or 0)&gt;2000 then return true end
+    if (pad.LeftTrigger or 0)&gt;20 then return true end
+    if (pad.RightTrigger or 0)&gt;20 then return true end
+    return pad.GAMEPAD_DPAD_UP or pad.GAMEPAD_DPAD_DOWN or
+      pad.GAMEPAD_DPAD_LEFT or pad.GAMEPAD_DPAD_RIGHT or
+      pad.GAMEPAD_START or pad.GAMEPAD_BACK or
+      pad.GAMEPAD_LEFT_THUMB or pad.GAMEPAD_RIGHT_THUMB or
+      pad.GAMEPAD_LEFT_SHOULDER or pad.GAMEPAD_RIGHT_SHOULDER or
+      pad.GAMEPAD_A or pad.GAMEPAD_B or pad.GAMEPAD_X or pad.GAMEPAD_Y
+  end
+
+  local function getGamepadState()
+    if getXBox360ControllerState == nil then return nil end
+    if gamepadControllerID ~= nil then
+      local pad = getXBox360ControllerState(gamepadControllerID)
+      if gamepadIsActive(pad) then return pad end
+    end
+    local fallback = nil
+    for i=0,3,1 do
+      local pad = getXBox360ControllerState(i)
+      if pad ~= nil then
+        if fallback == nil then fallback = pad end
+        if gamepadIsActive(pad) then
+          gamepadControllerID = i
+          return pad
+        end
+      end
+    end
+    return fallback
+  end
+
   local function pollGamepadCamera()
-    if getXBox360ControllerState == nil then return false end
-    local pad = getXBox360ControllerState(0)
+    local pad = getGamepadState()
     if pad == nil then return false end
     local leftX = gamepadAxis(pad.ThumbLeftX, gamepadMoveDeadzone)
     local leftY = gamepadAxis(pad.ThumbLeftY, gamepadMoveDeadzone)
@@ -6011,6 +6047,10 @@ if funcHotkeys ~= nil then
   for i,v in ipairs(funcHotkeys) do v.destroy() end
   funcHotkeys = nil
 end
+if hudToggleTimer ~= nil then
+  hudToggleTimer.destroy()
+  hudToggleTimer = nil
+end
 -- end destroy
 
   local base = readInteger("_settings")
@@ -6051,6 +6091,15 @@ end
     local hud = readInteger(hudAD)
     local hidden = readInteger("_hudToggle") == 1 or hud == 0
     setHUDHidden(not hidden)
+  end
+
+  hudToggleTimer = createTimer()
+  hudToggleTimer.setInterval(10)
+  hudToggleTimer.onTimer = function()
+    if readInteger("_hudToggle") == 1 then
+      writeInteger(hudAD, 0)
+      setOutlines(0)
+    end
   end
 
   local function toggleAberration()
@@ -6115,10 +6164,18 @@ if funcHotkeys ~= nil then
   for i,v in ipairs(funcHotkeys) do v.destroy() end
   funcHotkeys = nil
 end
+if hudToggleTimer ~= nil then
+  hudToggleTimer.destroy()
+  hudToggleTimer = nil
+end
 if getAddressSafe ~= nil and getAddressSafe("_hudToggle") ~= nil then
   writeInteger("_hudToggle", 0)
 end
 pcall(function() writeInteger("LifeIsStrange.exe+1110598", 1) end)
+pcall(function()
+  local outbase = readInteger("_outlines")
+  if outbase ~= nil and outbase ~= 0 then writeInteger(outbase+0x4F9C, 1) end
+end)
 </AssemblerScript>
           <CheatEntries>
             <CheatEntry>

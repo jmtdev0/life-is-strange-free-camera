@@ -1,0 +1,1034 @@
+<?xml version="1.0" encoding="utf-8"?>
+<CheatTable CheatEngineTableVersion="26">
+  <CheatEntries>
+    <CheatEntry>
+      <ID>20000</ID>
+      <Description>"Life Is Strange Free Camera - Gamepad Focused"</Description>
+      <LastState Value="" RealAddress="00000000"/>
+      <Color>000000</Color>
+      <GroupHeader>1</GroupHeader>
+    </CheatEntry>
+    <CheatEntry>
+      <ID>20001</ID>
+      <Description>"Use the included LifeIsStrangeInput.freecam-current.ini so Max moves with arrow keys."</Description>
+      <LastState Value="" RealAddress="00000000"/>
+      <Color>000000</Color>
+      <GroupHeader>1</GroupHeader>
+    </CheatEntry>
+    <CheatEntry>
+      <ID>20010</ID>
+      <Description>"&gt;&gt; FREE CAMERA + HUD [F2]"</Description>
+      <Options moHideChildren="1"/>
+      <LastState/>
+      <Color>FF0000</Color>
+      <VariableType>Auto Assembler Script</VariableType>
+      <AssemblerScript>[ENABLE]
+// Camera base
+aobscanmodule(lfcCameraAOB,LifeIsStrange.exe,8B 03 57 8B CB FF 90 94 04 00 00 5F)
+alloc(lfcCamMem,$1000)
+
+label(lfcCamCode)
+label(lfcCamSkipWrite)
+label(lfcCamReturn)
+
+globalalloc(lfc_camera,4)
+globalalloc(lfc_poseActive,4)
+globalalloc(lfc_desiredCamX,4)
+globalalloc(lfc_desiredCamY,4)
+globalalloc(lfc_desiredCamZ,4)
+globalalloc(lfc_desiredTarX,4)
+globalalloc(lfc_desiredTarY,4)
+globalalloc(lfc_desiredTarZ,4)
+globalalloc(lfc_hookWriteCount,4)
+globalalloc(lfc_debugLogs,4)
+
+lfcCamMem:
+
+lfcCamCode:
+  mov [lfc_camera],ebx
+  mov eax,[ebx]
+  push edi
+  mov ecx,ebx
+  call dword ptr [eax+00000494]
+  pop edi
+  pushfd
+  cmp dword ptr [lfc_poseActive],1
+  jne lfcCamSkipWrite
+  push eax
+  mov eax,[lfc_desiredCamX]
+  mov [ebx+000006F4],eax
+  mov eax,[lfc_desiredCamY]
+  mov [ebx+000006F8],eax
+  mov eax,[lfc_desiredCamZ]
+  mov [ebx+000006FC],eax
+  mov eax,[lfc_desiredTarX]
+  mov [ebx+00000710],eax
+  mov eax,[lfc_desiredTarY]
+  mov [ebx+00000714],eax
+  mov eax,[lfc_desiredTarZ]
+  mov [ebx+00000718],eax
+  mov eax,[lfc_hookWriteCount]
+  inc eax
+  mov [lfc_hookWriteCount],eax
+  pop eax
+lfcCamSkipWrite:
+  popfd
+  jmp lfcCamReturn
+
+lfcCameraAOB:
+  jmp lfcCamCode
+  nop
+  nop
+  nop
+  nop
+  nop
+  nop
+  nop
+lfcCamReturn:
+registersymbol(lfcCameraAOB)
+
+// Target outlines. Used only to force outlines off while HUD is hidden.
+aobscanmodule(lfcOutlinesAOB,LifeIsStrange.exe,39 8A 9C 4F 00 00)
+alloc(lfcOutlinesMem,$1000)
+
+label(lfcOutlinesCode)
+label(lfcOutlinesCmp)
+label(lfcOutlinesReturn)
+
+globalalloc(lfc_outlines,4)
+globalalloc(lfc_hudToggle,4)
+
+lfcOutlinesMem:
+
+lfcOutlinesCode:
+  mov [lfc_outlines],edx
+  cmp dword ptr [lfc_hudToggle],1
+  jne lfcOutlinesCmp
+  mov [edx+00004F9C],0
+lfcOutlinesCmp:
+  cmp [edx+00004F9C],ecx
+  jmp lfcOutlinesReturn
+
+lfcOutlinesAOB:
+  jmp lfcOutlinesCode
+  nop
+lfcOutlinesReturn:
+registersymbol(lfcOutlinesAOB)
+
+{$lua}
+if syntaxcheck then return end
+
+local debugLogPath = [[E:\Software\Coding\Modding\Life Is Strange Free Camera\logs\freecam-debug.log]]
+local debugLastHeartbeat = 0
+local debugLastControllerID = nil
+
+local function debugLogsEnabled()
+  local ok,value = pcall(function() return readInteger("lfc_debugLogs") end)
+  return ok and value == 1
+end
+
+local function debugLog(msg)
+  if not debugLogsEnabled() then return end
+  pcall(function()
+    local f = io.open(debugLogPath, "a")
+    if f ~= nil then
+      f:write(os.date("%Y-%m-%d %H:%M:%S"), " ", msg, "\n")
+      f:close()
+    end
+  end)
+end
+
+local function destroyList(list)
+  if list ~= nil then
+    for i,v in ipairs(list) do v.destroy() end
+  end
+end
+
+debugLog("ENABLE requested")
+
+destroyList(lfcHotkeys)
+lfcHotkeys = nil
+
+if lfcInitTimer ~= nil then lfcInitTimer.destroy(); lfcInitTimer = nil end
+if lfcCameraTimer ~= nil then lfcCameraTimer.destroy(); lfcCameraTimer = nil end
+if lfcHudTimer ~= nil then lfcHudTimer.destroy(); lfcHudTimer = nil end
+
+pcall(function() writeInteger("lfc_hudToggle", 0) end)
+pcall(function() writeInteger("lfc_poseActive", 0) end)
+pcall(function() writeInteger("lfc_hookWriteCount", 0) end)
+
+lfcInitTimer = createTimer()
+lfcInitTimer.Interval = 50
+lfcInitTimer.OnTimer = function(sender)
+  local cbase = readInteger("lfc_camera")
+  if cbase == nil or cbase == 0 then return end
+
+  local camXAD = cbase+0x6F4
+  local camYAD = cbase+0x6F8
+  local camZAD = cbase+0x6FC
+  local FOVAD  = cbase+0x70C
+  local tarXAD = cbase+0x710
+  local tarYAD = cbase+0x714
+  local tarZAD = cbase+0x718
+  local rollAD = cbase+0x71C
+  local currentIDAD = cbase+0x288
+  local hudAD = "LifeIsStrange.exe+1110598"
+
+  local flySpeed = 1
+  local cameraTimerInterval = 8
+  local movementReferenceMs = 16
+  local maxCameraStepScale = 1
+  local cameraStepScale = 1
+  local lastCameraTick = nil
+  local mouseLookSensitivity = math.pi/3600
+  local strafeSpeedScale = 0.75
+  local targetDistanceMin = 1000
+  local gamepadMoveDeadzone = 0.30
+  local gamepadLookDeadzone = 0.28
+  local gamepadLookPixels = 16
+  local gamepadSlowDiv = 4
+  local gamepadFastMult = 36
+  local pitchMax = 0.99*math.pi/2
+  local useZ = true
+  local gamepadControllerID = nil
+  local debugMoveLogInterval = 250
+  local debugFightLogInterval = 120
+  local debugFightThreshold = 0.05
+  local debugLastMoveLog = 0
+  local debugLastFightLog = 0
+  local debugLastStableLog = 0
+  local debugLastMouseLookLog = 0
+  local debugLastWrite = nil
+  local mouseLookButton = VK_LBUTTON or 0x01
+  local mouseLookActive = false
+  local mouseLastX = nil
+  local mouseLastY = nil
+  local mouseAnchorX = nil
+  local mouseAnchorY = nil
+  local mouseRecenterEnabled = true
+  local mouseLookMaxDelta = 120
+  local hookWriterEnabled = true
+  local directWriteWithHook = true
+  local stableViewEnabled = true
+  local stablePoseEnabled = true
+  local stableCamX = nil
+  local stableCamY = nil
+  local stableCamZ = nil
+  local stableViewX = nil
+  local stableViewY = nil
+  local stableViewZ = nil
+  local stableYaw = nil
+  local stablePitch = nil
+
+  debugLog(string.format("initialized cbase=0x%X flySpeed=%s cameraTimer=%d maxStep=%.2f strafeScale=%.2f targetDistanceMin=%.0f padDeadzones=(move=%.2f look=%.2f) speedMods=(slow=/%.1f fast=x%.1f) hookWriter=%s directWrite=%s stableView=%s stablePose=%s mouseRecenter=%s", cbase, tostring(flySpeed), cameraTimerInterval, maxCameraStepScale, strafeSpeedScale, targetDistanceMin, gamepadMoveDeadzone, gamepadLookDeadzone, gamepadSlowDiv, gamepadFastMult, tostring(hookWriterEnabled), tostring(directWriteWithHook), tostring(stableViewEnabled), tostring(stablePoseEnabled), tostring(mouseRecenterEnabled and setMousePos ~= nil)))
+
+  local function gameHasFocus()
+    return getOpenedProcessID() == getForegroundProcess()
+  end
+
+  local function writeDesiredPose(state, active)
+    if state == nil then return end
+    pcall(function()
+      writeFloat("lfc_desiredCamX", state.camX)
+      writeFloat("lfc_desiredCamY", state.camY)
+      writeFloat("lfc_desiredCamZ", state.camZ)
+      writeFloat("lfc_desiredTarX", state.tarX)
+      writeFloat("lfc_desiredTarY", state.tarY)
+      writeFloat("lfc_desiredTarZ", state.tarZ)
+      writeInteger("lfc_poseActive", active and 1 or 0)
+    end)
+  end
+
+  local function writePoseToGame(state)
+    if state == nil then return end
+    writeFloat(camXAD, state.camX)
+    writeFloat(camYAD, state.camY)
+    writeFloat(camZAD, state.camZ)
+    writeFloat(tarXAD, state.tarX)
+    writeFloat(tarYAD, state.tarY)
+    writeFloat(tarZAD, state.tarZ)
+  end
+
+  local function applyPose(state, active)
+    writeDesiredPose(state, active)
+    if directWriteWithHook or not hookWriterEnabled then writePoseToGame(state) end
+  end
+
+  local function angleFromVector(x, y, z)
+    local hypXY = math.sqrt(x*x+y*y)
+    local hypZ = math.sqrt(z*z+hypXY*hypXY)
+    if hypXY&lt;0.001 or hypZ&lt;0.001 then return nil, nil, hypXY, hypZ end
+    local yaw
+    if x == 0 then
+      if y&gt;=0 then yaw = math.pi/2 else yaw = -math.pi/2 end
+    else
+      yaw = math.atan(y/x)
+      if x&lt;0 and y&gt;=0 then yaw = yaw+math.pi end
+      if x&lt;0 and y&lt;0 then yaw = yaw-math.pi end
+    end
+    return yaw, math.asin(z/hypZ), hypXY, hypZ
+  end
+
+  local function normalizeYaw(yaw)
+    local full = math.pi*2
+    while yaw&gt;math.pi do yaw = yaw-full end
+    while yaw&lt;-math.pi do yaw = yaw+full end
+    return yaw
+  end
+
+  local function stableViewLength()
+    if stableViewX == nil or stableViewY == nil or stableViewZ == nil then return nil end
+    return math.sqrt(stableViewX*stableViewX+stableViewY*stableViewY+stableViewZ*stableViewZ)
+  end
+
+  local function enforceTargetDistance(reason)
+    local len = stableViewLength()
+    if len == nil or len&lt;0.001 or len&gt;=targetDistanceMin then return false end
+    local scale = targetDistanceMin/len
+    stableViewX = stableViewX*scale
+    stableViewY = stableViewY*scale
+    stableViewZ = stableViewZ*scale
+    debugLog(string.format("target-distance reason=%s old=%.3f new=%.3f", tostring(reason), len, targetDistanceMin))
+    return true
+  end
+
+  local function resetStableView(reason)
+    if not stableViewEnabled then return false end
+    local camX = readFloat(camXAD)
+    local camY = readFloat(camYAD)
+    local camZ = readFloat(camZAD)
+    local tarX = readFloat(tarXAD)
+    local tarY = readFloat(tarYAD)
+    local tarZ = readFloat(tarZAD)
+    if camX == nil or camY == nil or camZ == nil or tarX == nil or tarY == nil or tarZ == nil then return false end
+    stableCamX = camX
+    stableCamY = camY
+    stableCamZ = camZ
+    stableViewX = tarX-camX
+    stableViewY = tarY-camY
+    stableViewZ = tarZ-camZ
+    local len = stableViewLength() or 0
+    enforceTargetDistance(reason)
+    len = stableViewLength() or len
+    stableYaw, stablePitch = angleFromVector(stableViewX, stableViewY, stableViewZ)
+    writeDesiredPose({
+      camX = stableCamX,
+      camY = stableCamY,
+      camZ = stableCamZ,
+      tarX = tarX,
+      tarY = tarY,
+      tarZ = tarZ
+    }, true)
+    debugLog(string.format("stable-pose reset reason=%s cam=(%.3f,%.3f,%.3f) view=(%.3f,%.3f,%.3f) len=%.3f", tostring(reason), stableCamX, stableCamY, stableCamZ, stableViewX, stableViewY, stableViewZ, len))
+    return true
+  end
+
+  local function stableViewReady()
+    if not stableViewEnabled then return false end
+    if stableViewX == nil or stableViewY == nil or stableViewZ == nil or
+      stableYaw == nil or stablePitch == nil or
+      (stablePoseEnabled and (stableCamX == nil or stableCamY == nil or stableCamZ == nil)) then
+      return resetStableView("lazy-init")
+    end
+    enforceTargetDistance("stable-ready")
+    return true
+  end
+
+  local function getFreecamID()
+    local idptr = readInteger(cbase+0x2A4)
+    if idptr == nil or idptr == 0 then return nil end
+    return readInteger(idptr)
+  end
+
+  local function freecamEnabled()
+    local freecamID = getFreecamID()
+    return freecamID ~= nil and freecamID == readInteger(currentIDAD)
+  end
+
+  local function requiredCamera()
+    return freecamEnabled() and gameHasFocus()
+  end
+
+  local function toggleFreecam()
+    if not gameHasFocus() then return end
+    if freecamEnabled() then
+      writeInteger(currentIDAD, 0)
+      stableCamX = nil
+      stableCamY = nil
+      stableCamZ = nil
+      stableViewX = nil
+      stableViewY = nil
+      stableViewZ = nil
+      stableYaw = nil
+      stablePitch = nil
+      debugLastWrite = nil
+      writeDesiredPose(nil, false)
+      pcall(function() writeInteger("lfc_poseActive", 0) end)
+      debugLog("freecam off")
+    else
+      local freecamID = getFreecamID()
+      if freecamID ~= nil then
+        writeInteger(currentIDAD, freecamID)
+        resetStableView("freecam-on")
+        debugLog("freecam on freecamID=" .. tostring(freecamID))
+      else
+        debugLog("freecam requested but freecamID was nil")
+      end
+    end
+  end
+
+  local function setOutlines(value)
+    local outbase = readInteger("lfc_outlines")
+    if outbase ~= nil and outbase ~= 0 then
+      writeInteger(outbase+0x4F9C, value)
+    end
+  end
+
+  local function setHUDHidden(hidden)
+    if hidden then
+      writeInteger(hudAD, 0)
+      writeInteger("lfc_hudToggle", 1)
+      setOutlines(0)
+      debugLog("hud hidden")
+    else
+      writeInteger(hudAD, 1)
+      writeInteger("lfc_hudToggle", 0)
+      setOutlines(1)
+      debugLog("hud visible")
+    end
+  end
+
+  local function toggleHUD()
+    local hud = readInteger(hudAD)
+    local hidden = readInteger("lfc_hudToggle") == 1 or hud == 0
+    setHUDHidden(not hidden)
+  end
+
+  local function mouseLook(dx, dy)
+    if dx == 0 and dy == 0 then return false end
+    local camX
+    local camY
+    local camZ
+    if stablePoseEnabled and stableViewReady() then
+      camX = stableCamX
+      camY = stableCamY
+      camZ = stableCamZ
+    else
+      camX = readFloat(camXAD)
+      camY = readFloat(camYAD)
+      camZ = readFloat(camZAD)
+    end
+    local Xdiff
+    local Ydiff
+    local Zdiff
+    if stableViewEnabled and stableViewReady() then
+      Xdiff = stableViewX
+      Ydiff = stableViewY
+      Zdiff = stableViewZ
+    else
+      local tarX = readFloat(tarXAD)
+      local tarY = readFloat(tarYAD)
+      local tarZ = readFloat(tarZAD)
+      Xdiff = tarX-camX
+      Ydiff = tarY-camY
+      Zdiff = tarZ-camZ
+    end
+    local hypXY = math.sqrt(Xdiff*Xdiff+Ydiff*Ydiff)
+    local hypZ = math.sqrt(Zdiff*Zdiff+hypXY*hypXY)
+    if hypXY&lt;0.001 or hypZ&lt;0.001 then return false end
+    if hypZ&lt;targetDistanceMin then hypZ = targetDistanceMin end
+    local yaw = stableYaw
+    local pitch = stablePitch
+    if yaw == nil or pitch == nil then
+      yaw, pitch = angleFromVector(Xdiff, Ydiff, Zdiff)
+      if yaw == nil or pitch == nil then return false end
+    end
+    yaw = normalizeYaw(yaw+dx*mouseLookSensitivity)
+    pitch = pitch-dy*mouseLookSensitivity
+    if pitch&gt;pitchMax then pitch = pitchMax end
+    if pitch&lt;-pitchMax then pitch = -pitchMax end
+    local newXY = hypZ*math.cos(pitch)
+    local newViewX = newXY*math.cos(yaw)
+    local newViewY = newXY*math.sin(yaw)
+    local newViewZ = hypZ*math.sin(pitch)
+    if stableViewEnabled then
+      stableViewX = newViewX
+      stableViewY = newViewY
+      stableViewZ = newViewZ
+      stableYaw = yaw
+      stablePitch = pitch
+    end
+    if stablePoseEnabled then
+      stableCamX = camX
+      stableCamY = camY
+      stableCamZ = camZ
+    end
+    local state = {
+      camX = camX,
+      camY = camY,
+      camZ = camZ,
+      tarX = camX+newViewX,
+      tarY = camY+newViewY,
+      tarZ = camZ+newViewZ
+    }
+    applyPose(state, true)
+    return true, state
+  end
+
+  local function gamepadAxis(value, deadzone)
+    if value == nil then return 0 end
+    local n
+    if value&gt;=0 then n = value/32767 else n = value/32768 end
+    local a = math.abs(n)
+    if a&lt;deadzone then return 0 end
+    if n&gt;0 then return (a-deadzone)/(1-deadzone) end
+    return -(a-deadzone)/(1-deadzone)
+  end
+
+  local function gamepadIsActive(pad)
+    if pad == nil then return false end
+    if math.abs(pad.ThumbLeftX or 0)&gt;2000 then return true end
+    if math.abs(pad.ThumbLeftY or 0)&gt;2000 then return true end
+    if math.abs(pad.ThumbRightX or 0)&gt;2000 then return true end
+    if math.abs(pad.ThumbRightY or 0)&gt;2000 then return true end
+    if (pad.LeftTrigger or 0)&gt;20 then return true end
+    if (pad.RightTrigger or 0)&gt;20 then return true end
+    return pad.GAMEPAD_DPAD_UP or pad.GAMEPAD_DPAD_DOWN or
+      pad.GAMEPAD_DPAD_LEFT or pad.GAMEPAD_DPAD_RIGHT or
+      pad.GAMEPAD_START or pad.GAMEPAD_BACK or
+      pad.GAMEPAD_LEFT_THUMB or pad.GAMEPAD_RIGHT_THUMB or
+      pad.GAMEPAD_LEFT_SHOULDER or pad.GAMEPAD_RIGHT_SHOULDER or
+      pad.GAMEPAD_A or pad.GAMEPAD_B or pad.GAMEPAD_X or pad.GAMEPAD_Y
+  end
+
+  local function getGamepadState()
+    if getXBox360ControllerState == nil then return nil end
+    if gamepadControllerID ~= nil then
+      local pad = getXBox360ControllerState(gamepadControllerID)
+      if gamepadIsActive(pad) then return pad end
+    end
+    local fallback = nil
+    for i=0,3,1 do
+      local pad = getXBox360ControllerState(i)
+      if pad ~= nil then
+        if fallback == nil then fallback = pad end
+        if gamepadIsActive(pad) then
+          gamepadControllerID = i
+          if debugLastControllerID ~= i then
+            debugLastControllerID = i
+            debugLog("active controller id=" .. tostring(i))
+          end
+          return pad
+        end
+      end
+    end
+    return fallback
+  end
+
+  local function moveSpeedScaleFromPad(pad)
+    local scale = 1
+    if pad ~= nil and pad.GAMEPAD_X then scale = scale/gamepadSlowDiv end
+    if pad ~= nil and pad.GAMEPAD_Y then scale = scale*gamepadFastMult end
+    return scale
+  end
+
+  local function debugDist3(ax, ay, az, bx, by, bz)
+    local dx = (ax or 0)-(bx or 0)
+    local dy = (ay or 0)-(by or 0)
+    local dz = (az or 0)-(bz or 0)
+    return math.sqrt(dx*dx+dy*dy+dz*dz)
+  end
+
+  local function debugReadCameraState()
+    return {
+      camX = readFloat(camXAD) or 0,
+      camY = readFloat(camYAD) or 0,
+      camZ = readFloat(camZAD) or 0,
+      tarX = readFloat(tarXAD) or 0,
+      tarY = readFloat(tarYAD) or 0,
+      tarZ = readFloat(tarZAD) or 0
+    }
+  end
+
+  local function debugRememberWrite(action, state, detail)
+    debugLastWrite = {
+      tick = getTickCount(),
+      action = action,
+      detail = detail or "",
+      camX = state.camX,
+      camY = state.camY,
+      camZ = state.camZ,
+      tarX = state.tarX,
+      tarY = state.tarY,
+      tarZ = state.tarZ
+    }
+  end
+
+  local function readMousePosition()
+    if getMousePos == nil then return nil, nil end
+    local x,y = getMousePos()
+    if type(x) == "table" then
+      return x.x or x.X or x[1], x.y or x.Y or x[2]
+    end
+    return x,y
+  end
+
+  local function debugCheckExternalFight(state)
+    if debugLastWrite == nil then return end
+    local camDX = state.camX-debugLastWrite.camX
+    local camDY = state.camY-debugLastWrite.camY
+    local camDZ = state.camZ-debugLastWrite.camZ
+    local tarDX = state.tarX-debugLastWrite.tarX
+    local tarDY = state.tarY-debugLastWrite.tarY
+    local tarDZ = state.tarZ-debugLastWrite.tarZ
+    local camDiff = debugDist3(state.camX, state.camY, state.camZ, debugLastWrite.camX, debugLastWrite.camY, debugLastWrite.camZ)
+    local tarDiff = debugDist3(state.tarX, state.tarY, state.tarZ, debugLastWrite.tarX, debugLastWrite.tarY, debugLastWrite.tarZ)
+    if camDiff &lt;= debugFightThreshold and tarDiff &lt;= debugFightThreshold then return end
+    local now = getTickCount()
+    if now - debugLastFightLog &lt; debugFightLogInterval then return end
+    debugLastFightLog = now
+    debugLog(string.format(
+      "fight dt=%dms action=%s detail=%s camDiff=%.3f tarDiff=%.3f camDelta=(%.3f,%.3f,%.3f) tarDelta=(%.3f,%.3f,%.3f) actualCam=(%.2f,%.2f,%.2f) expectedCam=(%.2f,%.2f,%.2f) actualTarget=(%.2f,%.2f,%.2f) expectedTarget=(%.2f,%.2f,%.2f)",
+      now-debugLastWrite.tick, tostring(debugLastWrite.action), tostring(debugLastWrite.detail), camDiff, tarDiff,
+      camDX, camDY, camDZ, tarDX, tarDY, tarDZ,
+      state.camX, state.camY, state.camZ,
+      debugLastWrite.camX, debugLastWrite.camY, debugLastWrite.camZ,
+      state.tarX, state.tarY, state.tarZ,
+      debugLastWrite.tarX, debugLastWrite.tarY, debugLastWrite.tarZ
+    ))
+  end
+
+  local function enforceStablePose(reason)
+    if not stableViewEnabled or not stableViewReady() then return false end
+    local oldCamX = readFloat(camXAD) or 0
+    local oldCamY = readFloat(camYAD) or 0
+    local oldCamZ = readFloat(camZAD) or 0
+    local oldTarX = readFloat(tarXAD) or 0
+    local oldTarY = readFloat(tarYAD) or 0
+    local oldTarZ = readFloat(tarZAD) or 0
+    local newCamX = oldCamX
+    local newCamY = oldCamY
+    local newCamZ = oldCamZ
+    if stablePoseEnabled then
+      newCamX = stableCamX
+      newCamY = stableCamY
+      newCamZ = stableCamZ
+    end
+    local newTarX = newCamX+stableViewX
+    local newTarY = newCamY+stableViewY
+    local newTarZ = newCamZ+stableViewZ
+    local camCorrection = debugDist3(newCamX, newCamY, newCamZ, oldCamX, oldCamY, oldCamZ)
+    local targetCorrection = debugDist3(newTarX, newTarY, newTarZ, oldTarX, oldTarY, oldTarZ)
+    local correction = math.max(camCorrection, targetCorrection)
+    local state = {
+      camX = newCamX,
+      camY = newCamY,
+      camZ = newCamZ,
+      tarX = newTarX,
+      tarY = newTarY,
+      tarZ = newTarZ
+    }
+    applyPose(state, true)
+    local detail = string.format("reason=%s camCorrection=%.3f targetCorrection=%.3f stableCam=(%.3f,%.3f,%.3f) stableView=(%.3f,%.3f,%.3f)", tostring(reason), camCorrection, targetCorrection, newCamX, newCamY, newCamZ, stableViewX, stableViewY, stableViewZ)
+    debugRememberWrite("stable-pose-enforce", state, detail)
+    local now = getTickCount()
+    if correction &gt; debugFightThreshold and now - debugLastStableLog &gt;= 500 then
+      debugLastStableLog = now
+      debugLog(string.format(
+        "stable-pose enforce %s camBefore=(%.2f,%.2f,%.2f) desiredCam=(%.2f,%.2f,%.2f) targetBefore=(%.2f,%.2f,%.2f) desiredTarget=(%.2f,%.2f,%.2f)",
+        detail, oldCamX, oldCamY, oldCamZ, newCamX, newCamY, newCamZ, oldTarX, oldTarY, oldTarZ, newTarX, newTarY, newTarZ
+      ))
+    end
+    return true
+  end
+
+  local function moveAnalog(forwardAmount, rightAmount, upAmount, speedScale, source)
+    if forwardAmount == 0 and rightAmount == 0 and upAmount == 0 then return false end
+    if not requiredCamera() then return false end
+    local mag = math.sqrt(forwardAmount*forwardAmount+rightAmount*rightAmount)
+    if mag&gt;1 then
+      forwardAmount = forwardAmount/mag
+      rightAmount = rightAmount/mag
+    end
+    local analogFlySpeed = flySpeed*(speedScale or 1)*cameraStepScale
+    local camX
+    local camY
+    local camZ
+    if stablePoseEnabled and stableViewReady() then
+      camX = stableCamX
+      camY = stableCamY
+      camZ = stableCamZ
+    else
+      camX = readFloat(camXAD)
+      camY = readFloat(camYAD)
+      camZ = readFloat(camZAD)
+    end
+    local tarX
+    local tarY
+    local tarZ
+    local Xdiff
+    local Ydiff
+    local Zdiff
+    if stableViewEnabled and stableViewReady() then
+      Xdiff = stableViewX
+      Ydiff = stableViewY
+      Zdiff = stableViewZ
+      tarX = camX+Xdiff
+      tarY = camY+Ydiff
+      tarZ = camZ+Zdiff
+    else
+      tarX = readFloat(tarXAD)
+      tarY = readFloat(tarYAD)
+      tarZ = readFloat(tarZAD)
+      Xdiff = tarX-camX
+      Ydiff = tarY-camY
+      Zdiff = tarZ-camZ
+    end
+    local hypXY = math.sqrt(Xdiff*Xdiff+Ydiff*Ydiff)
+    local hypZ = math.sqrt(Zdiff*Zdiff+hypXY*hypXY)
+    local dX = 0
+    local dY = 0
+    local dZ = analogFlySpeed*upAmount
+    if forwardAmount ~= 0 then
+      if useZ and hypZ&gt;0.001 then
+        dX = dX+analogFlySpeed*forwardAmount*Xdiff/hypZ
+        dY = dY+analogFlySpeed*forwardAmount*Ydiff/hypZ
+        dZ = dZ+analogFlySpeed*forwardAmount*Zdiff/hypZ
+      elseif hypXY&gt;0.001 then
+        dX = dX+analogFlySpeed*forwardAmount*Xdiff/hypXY
+        dY = dY+analogFlySpeed*forwardAmount*Ydiff/hypXY
+      end
+    end
+    if rightAmount ~= 0 and hypXY&gt;0.001 then
+      local strafeFlySpeed = analogFlySpeed*strafeSpeedScale
+      local cosRoll = 1
+      local zFactor = 0
+      if useZ then
+        local roll = readFloat(rollAD)
+        cosRoll = math.cos(roll)
+        zFactor = -math.sin(roll)
+      end
+      dX = dX+strafeFlySpeed*rightAmount*(-Ydiff/hypXY)*cosRoll
+      dY = dY+strafeFlySpeed*rightAmount*( Xdiff/hypXY)*cosRoll
+      dZ = dZ+strafeFlySpeed*rightAmount*zFactor
+    end
+    if stablePoseEnabled then
+      stableCamX = camX+dX
+      stableCamY = camY+dY
+      stableCamZ = camZ+dZ
+    end
+    local writeState = {
+      camX = camX+dX,
+      camY = camY+dY,
+      camZ = camZ+dZ,
+      tarX = tarX+dX,
+      tarY = tarY+dY,
+      tarZ = tarZ+dZ
+    }
+    applyPose(writeState, true)
+    local moveDetail = string.format(
+      "input=(f=%.2f r=%.2f u=%.2f) moveDelta=(%.3f,%.3f,%.3f) view=(%.3f,%.3f,%.3f) hypXY=%.3f hypZ=%.3f scale=%.2f step=%.2f strafeScale=%.2f",
+      forwardAmount, rightAmount, upAmount, dX, dY, dZ, Xdiff, Ydiff, Zdiff, hypXY, hypZ, speedScale or 1, cameraStepScale, strafeSpeedScale
+    )
+    debugRememberWrite(source or "move", writeState, moveDetail)
+    local now = getTickCount()
+    if now - debugLastMoveLog &gt;= debugMoveLogInterval then
+      debugLastMoveLog = now
+      debugLog(string.format("move source=%s %s", tostring(source), moveDetail))
+    end
+    return true
+  end
+
+  local function pollKeyboardCamera(speedScale)
+    local forward = 0
+    local right = 0
+    if isKeyPressed(VK_W or 0x57) then forward = forward+1 end
+    if isKeyPressed(VK_S or 0x53) then forward = forward-1 end
+    if isKeyPressed(VK_D or 0x44) then right = right+1 end
+    if isKeyPressed(VK_A or 0x41) then right = right-1 end
+    return moveAnalog(forward, right, 0, speedScale, "keyboard")
+  end
+
+  local function pollMouseLook()
+    if not isKeyPressed(mouseLookButton) then
+      if mouseLookActive then debugLog("mouse-look stop") end
+      mouseLookActive = false
+      mouseLastX = nil
+      mouseLastY = nil
+      mouseAnchorX = nil
+      mouseAnchorY = nil
+      return false
+    end
+    local x,y = readMousePosition()
+    if x == nil or y == nil then return false end
+    if not mouseLookActive then
+      mouseLookActive = true
+      mouseLastX = x
+      mouseLastY = y
+      mouseAnchorX = x
+      mouseAnchorY = y
+      debugLog("mouse-look start mode=" .. tostring(mouseRecenterEnabled and setMousePos ~= nil and "recenter" or "absolute"))
+      return false
+    end
+    local dx
+    local dy
+    if mouseRecenterEnabled and setMousePos ~= nil and mouseAnchorX ~= nil and mouseAnchorY ~= nil then
+      dx = x-mouseAnchorX
+      dy = y-mouseAnchorY
+      setMousePos(mouseAnchorX, mouseAnchorY)
+      mouseLastX = mouseAnchorX
+      mouseLastY = mouseAnchorY
+    else
+      dx = x-mouseLastX
+      dy = y-mouseLastY
+      mouseLastX = x
+      mouseLastY = y
+    end
+    if dx == 0 and dy == 0 then return false end
+    if dx &gt; mouseLookMaxDelta then dx = mouseLookMaxDelta end
+    if dx &lt; -mouseLookMaxDelta then dx = -mouseLookMaxDelta end
+    if dy &gt; mouseLookMaxDelta then dy = mouseLookMaxDelta end
+    if dy &lt; -mouseLookMaxDelta then dy = -mouseLookMaxDelta end
+    local looked, lookState = mouseLook(dx, dy)
+    if not looked then return false end
+    if lookState == nil then lookState = debugReadCameraState() end
+    debugRememberWrite("mouse-look", lookState, string.format("mouseDelta=(%.1f,%.1f)", dx, dy))
+    local now = getTickCount()
+    if now - debugLastMouseLookLog &gt;= 250 then
+      debugLastMouseLookLog = now
+      debugLog(string.format("mouse-look delta=(%.1f,%.1f)", dx, dy))
+    end
+    return true
+  end
+
+  local function pollGamepadCamera(pad, moveSpeedScale)
+    if pad == nil then return false end
+    local leftX = gamepadAxis(pad.ThumbLeftX, gamepadMoveDeadzone)
+    local leftY = gamepadAxis(pad.ThumbLeftY, gamepadMoveDeadzone)
+    local rightX = gamepadAxis(pad.ThumbRightX, gamepadLookDeadzone)
+    local rightY = gamepadAxis(pad.ThumbRightY, gamepadLookDeadzone)
+    local moved = moveAnalog(leftY, leftX, 0, moveSpeedScale, "gamepad")
+    if rightX ~= 0 or rightY ~= 0 then
+      local lookDX = rightX*gamepadLookPixels*cameraStepScale
+      local lookDY = -rightY*gamepadLookPixels*cameraStepScale
+      local looked, lookState = mouseLook(lookDX, lookDY)
+      if lookState == nil then lookState = debugReadCameraState() end
+      debugRememberWrite(
+        "gamepad-look",
+        lookState,
+        string.format("lookInput=(rx=%.2f ry=%.2f) pixels=(%.2f,%.2f)", rightX, rightY, lookDX, lookDY)
+      )
+      return true
+    end
+    return moved
+  end
+
+  lfcCameraTimer = createTimer()
+  lfcCameraTimer.Interval = cameraTimerInterval
+  lfcCameraTimer.OnTimer = function()
+    if not requiredCamera() then
+      lastCameraTick = nil
+      return
+    end
+    local now = getTickCount()
+    if lastCameraTick == nil then
+      cameraStepScale = cameraTimerInterval/movementReferenceMs
+    else
+      local dt = now-lastCameraTick
+      if dt&lt;1 or dt&gt;50 then dt = cameraTimerInterval end
+      cameraStepScale = dt/movementReferenceMs
+    end
+    if cameraStepScale&gt;maxCameraStepScale then cameraStepScale = maxCameraStepScale end
+    lastCameraTick = now
+    debugCheckExternalFight(debugReadCameraState())
+    enforceStablePose("pre-input")
+    local pad = getGamepadState()
+    local moveScale = moveSpeedScaleFromPad(pad)
+    pollKeyboardCamera(moveScale)
+    pollMouseLook()
+    pollGamepadCamera(pad, moveScale)
+    if now - debugLastHeartbeat &gt;= 1000 then
+      debugLastHeartbeat = now
+      local camX = readFloat(camXAD) or 0
+      local camY = readFloat(camYAD) or 0
+      local camZ = readFloat(camZAD) or 0
+      local poseInfo = ""
+      if stablePoseEnabled and stableCamX ~= nil and stableCamY ~= nil and stableCamZ ~= nil then
+        local camDrift = debugDist3(camX, camY, camZ, stableCamX, stableCamY, stableCamZ)
+        poseInfo = string.format(" stableCam=(%.2f,%.2f,%.2f) camDrift=%.3f viewLen=%.1f", stableCamX, stableCamY, stableCamZ, camDrift, stableViewLength() or 0)
+      end
+      local hookInfo = ""
+      if hookWriterEnabled then
+        hookInfo = string.format(" hookWrites=%s poseActive=%s", tostring(readInteger("lfc_hookWriteCount")), tostring(readInteger("lfc_poseActive")))
+      end
+      local padInfo = "none"
+      if pad ~= nil then
+        padInfo = string.format(
+          "LX=%s LY=%s RX=%s RY=%s A=%s X=%s Y=%s",
+          tostring(pad.ThumbLeftX), tostring(pad.ThumbLeftY),
+          tostring(pad.ThumbRightX), tostring(pad.ThumbRightY),
+          tostring(pad.GAMEPAD_A), tostring(pad.GAMEPAD_X), tostring(pad.GAMEPAD_Y)
+        )
+      end
+      debugLog(string.format("heartbeat cam=(%.2f,%.2f,%.2f)%s%s moveScale=%.2f step=%.2f pad=%s", camX, camY, camZ, poseInfo, hookInfo, moveScale, cameraStepScale, padInfo))
+    end
+  end
+
+  lfcHudTimer = createTimer()
+  lfcHudTimer.Interval = 10
+  lfcHudTimer.OnTimer = function()
+    if readInteger("lfc_hudToggle") == 1 then
+      writeInteger(hudAD, 0)
+      setOutlines(0)
+    end
+  end
+
+  lfcHotkeys = {
+    createHotkey(toggleFreecam, VK_NEXT),
+    createHotkey(toggleHUD, VK_DELETE or 0x2E)
+  }
+  for i,v in ipairs(lfcHotkeys) do v.DelayBetweenActivate = 250 end
+
+  sender.destroy()
+  lfcInitTimer = nil
+end
+
+{$asm}
+[DISABLE]
+
+lfcCameraAOB:
+  db 8B 03 57 8B CB FF 90 94 04 00 00 5F
+
+unregistersymbol(lfcCameraAOB)
+dealloc(lfcCamMem)
+
+lfcOutlinesAOB:
+  db 39 8A 9C 4F 00 00
+
+unregistersymbol(lfcOutlinesAOB)
+dealloc(lfcOutlinesMem)
+
+{$lua}
+local function debugDisableLog(msg)
+  local ok,value = pcall(function() return readInteger("lfc_debugLogs") end)
+  if not ok or value ~= 1 then return end
+  pcall(function()
+    local f = io.open([[E:\Software\Coding\Modding\Life Is Strange Free Camera\logs\freecam-debug.log]], "a")
+    if f ~= nil then
+      f:write(os.date("%Y-%m-%d %H:%M:%S"), " ", msg, "\n")
+      f:close()
+    end
+  end)
+end
+
+debugDisableLog("DISABLE requested")
+
+local function destroyDisableList(list)
+  if list ~= nil then
+    for i,v in ipairs(list) do v.destroy() end
+  end
+end
+
+destroyDisableList(lfcHotkeys)
+lfcHotkeys = nil
+
+if lfcInitTimer ~= nil then lfcInitTimer.destroy(); lfcInitTimer = nil end
+if lfcCameraTimer ~= nil then lfcCameraTimer.destroy(); lfcCameraTimer = nil end
+if lfcHudTimer ~= nil then lfcHudTimer.destroy(); lfcHudTimer = nil end
+
+pcall(function() writeInteger("lfc_hudToggle", 0) end)
+pcall(function() writeInteger("lfc_poseActive", 0) end)
+pcall(function() writeInteger("LifeIsStrange.exe+1110598", 1) end)
+pcall(function()
+  local outbase = readInteger("lfc_outlines")
+  if outbase ~= nil and outbase ~= 0 then writeInteger(outbase+0x4F9C, 1) end
+end)
+</AssemblerScript>
+      <Hotkeys>
+        <Hotkey>
+          <Action>Activate</Action>
+          <Keys>
+            <Key>113</Key>
+          </Keys>
+          <ID>0</ID>
+        </Hotkey>
+      </Hotkeys>
+      <CheatEntries>
+        <CheatEntry>
+          <ID>20011</ID>
+          <Description>"F2: initialize this table"</Description>
+          <LastState Value="" RealAddress="00000000"/>
+          <Color>000000</Color>
+          <GroupHeader>1</GroupHeader>
+        </CheatEntry>
+        <CheatEntry>
+          <ID>20012</ID>
+          <Description>"PageDown: toggle freecam"</Description>
+          <LastState Value="" RealAddress="00000000"/>
+          <Color>000000</Color>
+          <GroupHeader>1</GroupHeader>
+        </CheatEntry>
+        <CheatEntry>
+          <ID>20013</ID>
+          <Description>"Camera move: gamepad left stick or WASD"</Description>
+          <LastState Value="" RealAddress="00000000"/>
+          <Color>000000</Color>
+          <GroupHeader>1</GroupHeader>
+        </CheatEntry>
+        <CheatEntry>
+          <ID>20014</ID>
+          <Description>"Camera look: hold left mouse button or use gamepad right stick"</Description>
+          <LastState Value="" RealAddress="00000000"/>
+          <Color>000000</Color>
+          <GroupHeader>1</GroupHeader>
+        </CheatEntry>
+        <CheatEntry>
+          <ID>20015</ID>
+          <Description>"Hold Square / Xbox X: slow camera; hold Triangle / Xbox Y: very fast camera"</Description>
+          <LastState Value="" RealAddress="00000000"/>
+          <Color>000000</Color>
+          <GroupHeader>1</GroupHeader>
+        </CheatEntry>
+        <CheatEntry>
+          <ID>20016</ID>
+          <Description>"Delete/Supr: toggle HUD and outlines"</Description>
+          <LastState Value="" RealAddress="00000000"/>
+          <Color>000000</Color>
+          <GroupHeader>1</GroupHeader>
+        </CheatEntry>
+        <CheatEntry>
+          <ID>20017</ID>
+          <Description>"Enable debug logging to logs/freecam-debug.log"</Description>
+          <LastState/>
+          <Color>000000</Color>
+          <VariableType>Auto Assembler Script</VariableType>
+          <AssemblerScript>[ENABLE]
+{$lua}
+if syntaxcheck then return end
+pcall(function() writeInteger("lfc_debugLogs", 1) end)
+pcall(function()
+  local f = io.open([[E:\Software\Coding\Modding\Life Is Strange Free Camera\logs\freecam-debug.log]], "a")
+  if f ~= nil then
+    f:write(os.date("%Y-%m-%d %H:%M:%S"), " debug logging enabled\n")
+    f:close()
+  end
+end)
+
+[DISABLE]
+{$lua}
+if syntaxcheck then return end
+pcall(function()
+  local f = io.open([[E:\Software\Coding\Modding\Life Is Strange Free Camera\logs\freecam-debug.log]], "a")
+  if f ~= nil then
+    f:write(os.date("%Y-%m-%d %H:%M:%S"), " debug logging disabled\n")
+    f:close()
+  end
+end)
+pcall(function() writeInteger("lfc_debugLogs", 0) end)
+</AssemblerScript>
+        </CheatEntry>
+      </CheatEntries>
+    </CheatEntry>
+  </CheatEntries>
+  <UserdefinedSymbols/>
+</CheatTable>

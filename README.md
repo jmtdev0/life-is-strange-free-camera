@@ -8,20 +8,23 @@ This work is based on **Life Is Strange - Photographer Mod v1.3 by IDK31**. The 
 
 ## Current Controls
 
-Load `LIS_PhotoMod1.3/LIS_PhotoMod1.3 - A ver.CT` in Cheat Engine, attach to `LifeIsStrange.exe`, activate `CAMERA CONTROLS`, and press `PageDown` to toggle freecam.
+Recommended table: `LIS_PhotoMod1.3/LIS_FreeCamera_Gamepad.CT`.
+
+Load it in Cheat Engine, attach to `LifeIsStrange.exe`, activate `FREE CAMERA + HUD` with `F2`, and press `PageDown` to toggle freecam.
 
 - Gamepad left stick: move freecam.
 - Gamepad right stick: look/rotate freecam.
-- Hold `X`: slow camera movement and look.
-- Hold `Y`: fast camera movement and look.
+- Hold Square / Xbox `X`: slow freecam movement.
+- Hold Triangle / Xbox `Y`: very fast freecam movement.
 - Left mouse button: mouse look fallback.
 - WASD: keyboard fallback for freecam movement.
-- Delete/Supr: toggle HUD and outlines, under `GAME SETTINGS`.
+- Delete/Supr: toggle HUD and outlines.
 - Arrow keys: move Max in-game, via the included `LifeIsStrangeInput.ini` profile.
 
 ## Files
 
-- `LIS_PhotoMod1.3/`: working Cheat Engine tables and backups.
+- `LIS_PhotoMod1.3/LIS_FreeCamera_Gamepad.CT`: streamlined table for the current workflow.
+- `LIS_PhotoMod1.3/`: original/working Cheat Engine tables and historical backups.
 - `config/LifeIsStrangeInput.freecam-current.ini`: current input profile copy.
 - `config/LifeIsStrangeInput.before-freecam-gamepad-20260519.ini`: input backup before gamepad freecam changes.
 - `config/LifeIsStrangeInput.before-wishlist-20260519.ini`: input backup before the arrow-key/gamepad wishlist changes.
@@ -35,4 +38,3 @@ To use the included profile, copy `config/LifeIsStrangeInput.freecam-current.ini
 ## Notes
 
 This is a Cheat Engine workflow for a single-player game. It patches live process memory and can crash the game. Back up saves before experimenting.
-
