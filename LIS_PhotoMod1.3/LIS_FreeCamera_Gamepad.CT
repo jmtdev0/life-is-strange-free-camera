@@ -40,7 +40,6 @@ globalalloc(lfc_desiredTarX,4)
 globalalloc(lfc_desiredTarY,4)
 globalalloc(lfc_desiredTarZ,4)
 globalalloc(lfc_hookWriteCount,4)
-globalalloc(lfc_debugLogs,4)
 
 lfcCamMem:
 
@@ -121,6 +120,9 @@ if syntaxcheck then return end
 local debugLogPath = [[E:\Software\Coding\Modding\Life Is Strange Free Camera\logs\freecam-debug.log]]
 local debugLastHeartbeat = 0
 local debugLastControllerID = nil
+local debugInputIniPath = [[C:\Users\jmart\Documents\My Games\Life Is Strange\LifeIsStrangeGame\Config\LifeIsStrangeInput.ini]]
+local debugInputUiIniPath = [[C:\Users\jmart\Documents\My Games\Life Is Strange\LifeIsStrangeGame\Config\LifeIsStrangeUI.ini]]
+local debugRepoInputIniPath = [[E:\Software\Coding\Modding\Life Is Strange Free Camera\config\LifeIsStrangeInput.freecam-current.ini]]
 
 local function debugLogsEnabled()
   local ok,value = pcall(function() return readInteger("lfc_debugLogs") end)
@@ -136,6 +138,63 @@ local function debugLog(msg)
       f:close()
     end
   end)
+end
+
+local function debugLogMatchingLines(path, patterns)
+  if not debugLogsEnabled() then return end
+  pcall(function()
+    local f = io.open(path, "r")
+    if f == nil then
+      debugLog("input-snapshot missing path=" .. tostring(path))
+      return
+    end
+    debugLog("input-snapshot begin path=" .. tostring(path))
+    for line in f:lines() do
+      for _,pattern in ipairs(patterns) do
+        if string.find(line, pattern, 1, true) ~= nil then
+          debugLog("input-snapshot line=" .. line)
+          break
+        end
+      end
+    end
+    f:close()
+    debugLog("input-snapshot end path=" .. tostring(path))
+  end)
+end
+
+local function debugLogInputSnapshot()
+  local gameplayPatterns = {
+    [[Bindings=(Name="W"]],
+    [[Bindings=(Name="A"]],
+    [[Bindings=(Name="S"]],
+    [[Bindings=(Name="D"]],
+    [[Bindings=(Name="Up"]],
+    [[Bindings=(Name="Down"]],
+    [[Bindings=(Name="Left"]],
+    [[Bindings=(Name="Right"]],
+    [[Bindings=(Name="MoveForward"]],
+    [[Bindings=(Name="MoveBackward"]],
+    [[Bindings=(Name="StrafeLeft"]],
+    [[Bindings=(Name="StrafeRight"]],
+    [[action_move_forward]],
+    [[action_move_left]],
+    [[action_move_right]],
+    [[action_move_backward]],
+    [[Gamepad_LeftStick]],
+    [[XboxTypeS_LeftX]],
+    [[XboxTypeS_LeftY]],
+    [[JoyLeft_X]],
+    [[JoyLeft_Y]]
+  }
+  local uiPatterns = {
+    [[ConfiguredAxisEmulationDefinitions]],
+    [[XboxTypeS_LeftX]],
+    [[XboxTypeS_LeftY]],
+    [[Gamepad_LeftStick]]
+  }
+  debugLogMatchingLines(debugInputIniPath, gameplayPatterns)
+  debugLogMatchingLines(debugRepoInputIniPath, gameplayPatterns)
+  debugLogMatchingLines(debugInputUiIniPath, uiPatterns)
 end
 
 local function destroyList(list)
@@ -198,6 +257,9 @@ lfcInitTimer.OnTimer = function(sender)
   local debugLastFightLog = 0
   local debugLastStableLog = 0
   local debugLastMouseLookLog = 0
+  local debugLastArrowLog = 0
+  local debugLastArrowState = ""
+  local debugLastPadMoveLog = 0
   local debugLastWrite = nil
   local mouseLookButton = VK_LBUTTON or 0x01
   local mouseLookActive = false
@@ -221,9 +283,25 @@ lfcInitTimer.OnTimer = function(sender)
   local stablePitch = nil
 
   debugLog(string.format("initialized cbase=0x%X flySpeed=%s cameraTimer=%d maxStep=%.2f strafeScale=%.2f targetDistanceMin=%.0f padDeadzones=(move=%.2f look=%.2f) speedMods=(slow=/%.1f fast=x%.1f) hookWriter=%s directWrite=%s stableView=%s stablePose=%s mouseRecenter=%s", cbase, tostring(flySpeed), cameraTimerInterval, maxCameraStepScale, strafeSpeedScale, targetDistanceMin, gamepadMoveDeadzone, gamepadLookDeadzone, gamepadSlowDiv, gamepadFastMult, tostring(hookWriterEnabled), tostring(directWriteWithHook), tostring(stableViewEnabled), tostring(stablePoseEnabled), tostring(mouseRecenterEnabled and setMousePos ~= nil)))
+  debugLogInputSnapshot()
 
   local function gameHasFocus()
     return getOpenedProcessID() == getForegroundProcess()
+  end
+
+  local function debugKeyPressed(vk)
+    local ok,down = pcall(function() return isKeyPressed(vk) end)
+    return ok and down == true
+  end
+
+  local function debugArrowState()
+    local parts = {}
+    if debugKeyPressed(0x26) then table.insert(parts, "Up") end
+    if debugKeyPressed(0x28) then table.insert(parts, "Down") end
+    if debugKeyPressed(0x25) then table.insert(parts, "Left") end
+    if debugKeyPressed(0x27) then table.insert(parts, "Right") end
+    if #parts == 0 then return "none" end
+    return table.concat(parts, "+")
   end
 
   local function writeDesiredPose(state, active)
@@ -840,10 +918,24 @@ lfcInitTimer.OnTimer = function(sender)
     end
     if cameraStepScale&gt;maxCameraStepScale then cameraStepScale = maxCameraStepScale end
     lastCameraTick = now
+    local arrowState = debugArrowState()
+    if arrowState ~= debugLastArrowState then
+      debugLastArrowState = arrowState
+      debugLastArrowLog = now
+      debugLog(string.format("arrow-keys state=%s focus=%s freecam=%s", arrowState, tostring(gameHasFocus()), tostring(freecamEnabled())))
+    end
     debugCheckExternalFight(debugReadCameraState())
     enforceStablePose("pre-input")
     local pad = getGamepadState()
     local moveScale = moveSpeedScaleFromPad(pad)
+    if pad ~= nil then
+      local debugLeftX = gamepadAxis(pad.ThumbLeftX, gamepadMoveDeadzone)
+      local debugLeftY = gamepadAxis(pad.ThumbLeftY, gamepadMoveDeadzone)
+      if (debugLeftX ~= 0 or debugLeftY ~= 0) and now - debugLastPadMoveLog &gt;= 250 then
+        debugLastPadMoveLog = now
+        debugLog(string.format("gamepad-left-stick raw=(%s,%s) normalized=(%.3f,%.3f) note=if-Max-moves-here-check-INI-bindings", tostring(pad.ThumbLeftX), tostring(pad.ThumbLeftY), debugLeftX, debugLeftY))
+      end
+    end
     pollKeyboardCamera(moveScale)
     pollMouseLook()
     pollGamepadCamera(pad, moveScale)
@@ -870,7 +962,7 @@ lfcInitTimer.OnTimer = function(sender)
           tostring(pad.GAMEPAD_A), tostring(pad.GAMEPAD_X), tostring(pad.GAMEPAD_Y)
         )
       end
-      debugLog(string.format("heartbeat cam=(%.2f,%.2f,%.2f)%s%s moveScale=%.2f step=%.2f pad=%s", camX, camY, camZ, poseInfo, hookInfo, moveScale, cameraStepScale, padInfo))
+      debugLog(string.format("heartbeat cam=(%.2f,%.2f,%.2f)%s%s moveScale=%.2f step=%.2f keys=%s pad=%s", camX, camY, camZ, poseInfo, hookInfo, moveScale, cameraStepScale, arrowState, padInfo))
     end
   end
 
@@ -996,16 +1088,287 @@ end)
           <Color>000000</Color>
           <GroupHeader>1</GroupHeader>
         </CheatEntry>
-        <CheatEntry>
-          <ID>20017</ID>
-          <Description>"Enable debug logging to logs/freecam-debug.log"</Description>
-          <LastState/>
-          <Color>000000</Color>
-          <VariableType>Auto Assembler Script</VariableType>
-          <AssemblerScript>[ENABLE]
+      </CheatEntries>
+    </CheatEntry>
+    <CheatEntry>
+      <ID>20018</ID>
+      <Description>"Block game's left stick input - experimental XInput hook"</Description>
+      <LastState/>
+      <Color>000000</Color>
+      <VariableType>Auto Assembler Script</VariableType>
+      <AssemblerScript>[ENABLE]
 {$lua}
 if syntaxcheck then return end
-pcall(function() writeInteger("lfc_debugLogs", 1) end)
+
+local logPath = [[E:\Software\Coding\Modding\Life Is Strange Free Camera\logs\freecam-debug.log]]
+
+local function xinputLog(msg)
+  pcall(function()
+    local f = io.open(logPath, "a")
+    if f ~= nil then
+      f:write(os.date("%Y-%m-%d %H:%M:%S"), " xinput-left-stick-hook ", msg, "\n")
+      f:close()
+    end
+  end)
+end
+
+local function byteHex(bytes, count)
+  local parts = {}
+  for i=1,count do table.insert(parts, string.format("%02X", bytes[i] or 0)) end
+  return table.concat(parts, " ")
+end
+
+local symbols = {
+  "XINPUT1_3.XInputGetState",
+  "xinput1_3.XInputGetState",
+  "XINPUT1_3.dll.XInputGetState",
+  "xinput1_3.dll.XInputGetState",
+  "xinput9_1_0.XInputGetState",
+  "XINPUT9_1_0.XInputGetState",
+  "xinput1_4.XInputGetState",
+  "XINPUT1_4.XInputGetState"
+}
+
+local addr = nil
+local symbol = nil
+for _,candidate in ipairs(symbols) do
+  addr = getAddressSafe(candidate)
+  if addr ~= nil then
+    symbol = candidate
+    break
+  end
+end
+
+if addr == nil then
+  xinputLog("failed: XInputGetState export was not found in the game process")
+  error("XInputGetState was not found. Start/attach the game first, then try again.")
+end
+
+local bytes = readBytes(addr, 8, true)
+if bytes == nil then
+  xinputLog(string.format("failed: could not read bytes at 0x%X", addr))
+  error("Could not read XInputGetState bytes.")
+end
+
+local function u32le(b, i)
+  return (b[i] or 0) + (b[i+1] or 0)*0x100 + (b[i+2] or 0)*0x10000 + (b[i+3] or 0)*0x1000000
+end
+
+local function s32le(b, i)
+  local v = u32le(b, i)
+  if v &gt;= 0x80000000 then v = v - 0x100000000 end
+  return v
+end
+
+local patchAddr = addr
+local originalCallAddr = nil
+local hookLen = nil
+local callMode = "gateway"
+
+if bytes[1] == 0xE9 then
+  hookLen = 5
+  callMode = "direct"
+  originalCallAddr = addr + 5 + s32le(bytes, 2)
+elseif bytes[1] == 0xFF and bytes[2] == 0x25 then
+  hookLen = 6
+  callMode = "direct"
+  local pointerAddress = u32le(bytes, 3)
+  originalCallAddr = readInteger(pointerAddress)
+elseif bytes[1] == 0x8B and bytes[2] == 0xFF and bytes[3] == 0x55 and bytes[4] == 0x8B and bytes[5] == 0xEC then
+  hookLen = 5
+elseif bytes[1] == 0x55 and bytes[2] == 0x8B and bytes[3] == 0xEC then
+  hookLen = 5
+end
+
+if hookLen == nil or (callMode == "direct" and originalCallAddr == nil) then
+  xinputLog(string.format("failed: unsupported prologue symbol=%s addr=0x%X bytes=%s", tostring(symbol), addr, byteHex(bytes, 8)))
+  error("Unsupported XInputGetState prologue: " .. byteHex(bytes, 8))
+end
+
+local nop = ""
+if hookLen == 6 then nop = "  nop" end
+
+local originalBytes = "  db " .. byteHex(bytes, hookLen)
+local directDefine = ""
+local originalBlock = string.format([[
+lfc_xinputOriginal:
+%s
+  jmp lfc_xinputPatch+%d
+]], originalBytes, hookLen)
+local originalCall = "  call lfc_xinputOriginal"
+
+if callMode == "direct" then
+  directDefine = string.format("define(lfc_xinputOriginalCall,%X)\n", originalCallAddr)
+  originalBlock = string.format([[
+lfc_xinputOriginal:
+%s
+]], originalBytes)
+  originalCall = "  call lfc_xinputOriginalCall"
+end
+
+local enableScript = string.format([[
+define(lfc_xinputPatch,%X)
+%s
+alloc(lfc_xinputHook,1024,lfc_xinputPatch)
+label(lfc_xinputOriginal)
+label(lfc_xinputDone)
+label(lfc_xinputArrowX)
+label(lfc_xinputArrowY)
+
+lfc_xinputHook:
+  push ebp
+  mov ebp,esp
+  push [ebp+0C]
+  push [ebp+08]
+%s
+  test eax,eax
+  jne lfc_xinputDone
+  mov ecx,[ebp+0C]
+  test ecx,ecx
+  je lfc_xinputDone
+  mov dx,word ptr [lfc_xinputArrowX]
+  mov [ecx+08],dx
+  mov dx,word ptr [lfc_xinputArrowY]
+  mov [ecx+0A],dx
+lfc_xinputDone:
+  mov esp,ebp
+  pop ebp
+  ret 8
+
+lfc_xinputArrowX:
+  dd 0
+lfc_xinputArrowY:
+  dd 0
+
+%s
+
+lfc_xinputPatch:
+  jmp lfc_xinputHook
+%s
+
+registersymbol(lfc_xinputHook)
+registersymbol(lfc_xinputOriginal)
+registersymbol(lfc_xinputArrowX)
+registersymbol(lfc_xinputArrowY)
+]], patchAddr, directDefine, originalCall, originalBlock, nop)
+
+local disableScript = string.format([[
+define(lfc_xinputPatch,%X)
+lfc_xinputPatch:
+%s
+unregistersymbol(lfc_xinputArrowY)
+unregistersymbol(lfc_xinputArrowX)
+unregistersymbol(lfc_xinputOriginal)
+unregistersymbol(lfc_xinputHook)
+dealloc(lfc_xinputHook)
+]], patchAddr, originalBytes)
+
+local ok,err = autoAssemble(enableScript)
+if not ok then
+  xinputLog("failed: " .. tostring(err))
+  error(err)
+end
+
+lfcXInputHookDisableScript = disableScript
+
+if lfcXInputArrowTimer ~= nil then
+  lfcXInputArrowTimer.destroy()
+  lfcXInputArrowTimer = nil
+end
+
+local lastArrowStick = nil
+local function setArrowStickValue(symbolName, value)
+  pcall(function() writeInteger(symbolName, value) end)
+end
+
+lfcXInputArrowTimer = createTimer()
+lfcXInputArrowTimer.Interval = 16
+lfcXInputArrowTimer.OnTimer = function()
+  local left = isKeyPressed(0x25)
+  local up = isKeyPressed(0x26)
+  local right = isKeyPressed(0x27)
+  local down = isKeyPressed(0x28)
+  local x = 0
+  local y = 0
+
+  if left and not right then
+    x = -32768
+  elseif right and not left then
+    x = 32767
+  end
+
+  if up and not down then
+    y = 32767
+  elseif down and not up then
+    y = -32768
+  end
+
+  setArrowStickValue("lfc_xinputArrowX", x)
+  setArrowStickValue("lfc_xinputArrowY", y)
+
+  local state = string.format("%d,%d", x, y)
+  if state ~= lastArrowStick then
+    lastArrowStick = state
+    xinputLog(string.format("arrow-stick x=%d y=%d left=%s up=%s right=%s down=%s", x, y, tostring(left), tostring(up), tostring(right), tostring(down)))
+  end
+end
+lfcXInputArrowTimer.Enabled = true
+
+xinputLog("arrow-to-left-stick timer started")
+xinputLog(string.format("enabled symbol=%s patch=0x%X callMode=%s originalCall=%s hookLen=%d bytes=%s", tostring(symbol), patchAddr, callMode, tostring(originalCallAddr), hookLen, byteHex(bytes, hookLen)))
+
+[DISABLE]
+{$lua}
+if syntaxcheck then return end
+
+local logPath = [[E:\Software\Coding\Modding\Life Is Strange Free Camera\logs\freecam-debug.log]]
+local function xinputLog(msg)
+  pcall(function()
+    local f = io.open(logPath, "a")
+    if f ~= nil then
+      f:write(os.date("%Y-%m-%d %H:%M:%S"), " xinput-left-stick-hook ", msg, "\n")
+      f:close()
+    end
+  end)
+end
+
+if lfcXInputArrowTimer ~= nil then
+  lfcXInputArrowTimer.destroy()
+  lfcXInputArrowTimer = nil
+end
+
+pcall(function()
+  writeInteger("lfc_xinputArrowX", 0)
+  writeInteger("lfc_xinputArrowY", 0)
+end)
+
+if lfcXInputHookDisableScript ~= nil then
+  local ok,err = autoAssemble(lfcXInputHookDisableScript)
+  if ok then
+    xinputLog("disabled")
+  else
+    xinputLog("disable failed: " .. tostring(err))
+  end
+  lfcXInputHookDisableScript = nil
+else
+  xinputLog("disable skipped: hook was not active")
+end
+</AssemblerScript>
+    </CheatEntry>
+    <CheatEntry>
+      <ID>20017</ID>
+      <Description>"Enable debug logging to logs/freecam-debug.log"</Description>
+      <LastState/>
+      <Color>000000</Color>
+      <VariableType>Auto Assembler Script</VariableType>
+      <AssemblerScript>[ENABLE]
+alloc(lfc_debugLogs,4)
+registersymbol(lfc_debugLogs)
+lfc_debugLogs:
+  dd 1
+
+{$lua}
+if syntaxcheck then return end
 pcall(function()
   local f = io.open([[E:\Software\Coding\Modding\Life Is Strange Free Camera\logs\freecam-debug.log]], "a")
   if f ~= nil then
@@ -1024,10 +1387,11 @@ pcall(function()
     f:close()
   end
 end)
-pcall(function() writeInteger("lfc_debugLogs", 0) end)
+
+{$asm}
+unregistersymbol(lfc_debugLogs)
+dealloc(lfc_debugLogs)
 </AssemblerScript>
-        </CheatEntry>
-      </CheatEntries>
     </CheatEntry>
   </CheatEntries>
   <UserdefinedSymbols/>
